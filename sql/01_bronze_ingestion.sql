@@ -60,3 +60,33 @@ FROM Sales.SalesTerritory;
 GO
 
 SELECT name FROM sys.tables WHERE schema_id = SCHEMA_ID('bronze');
+
+-- Verification Commands
+
+--SELECT 'SalesOrderHeader' AS TableName, COUNT(*) AS RecordCount FROM bronze.SalesOrderHeader
+--UNION ALL
+--SELECT 'SalesOrderDetail', COUNT(*) FROM bronze.SalesOrderDetail
+--UNION ALL
+--SELECT 'Customer', COUNT(*) FROM bronze.Customer;
+
+-- ====================================================================
+-- VERIFICATION: Bronze Layer Ingestion Check
+-- ====================================================================
+USE [AdventureWorks2012];
+GO
+
+-- Verify total table count in Bronze schema
+SELECT 
+    t.name AS TableName,
+    p.rows AS RecordCount,
+    c.ingested_at
+FROM sys.tables t
+INNER JOIN sys.schemas s ON t.schema_id = s.schema_id
+INNER JOIN sys.partitions p ON t.object_id = p.object_id AND p.index_id IN (0,1)
+CROSS APPLY (
+    SELECT TOP 1 _ingested_at AS ingested_at 
+    FROM bronze.SalesOrderHeader
+) c
+WHERE s.name = 'bronze'
+ORDER BY RecordCount DESC;
+GO
