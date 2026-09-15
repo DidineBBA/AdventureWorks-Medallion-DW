@@ -1,15 +1,14 @@
 USE [AdventureWorks2012];
 GO
 
--- 1. Create Gold Schema
-IF NOT EXISTS (SELECT * FROM sys.schemas WHERE name = 'gold')
-BEGIN
-    EXEC('CREATE SCHEMA [gold];');
-END;
+-- 1. Drop Tables in Correct Dependency Order
+IF OBJECT_ID('gold.Fact_Sales', 'U') IS NOT NULL DROP TABLE gold.Fact_Sales;
+IF OBJECT_ID('gold.Dim_Date', 'U') IS NOT NULL DROP TABLE gold.Dim_Date;
+IF OBJECT_ID('gold.Dim_Customer', 'U') IS NOT NULL DROP TABLE gold.Dim_Customer;
+IF OBJECT_ID('gold.Dim_Product', 'U') IS NOT NULL DROP TABLE gold.Dim_Product;
 GO
 
--- 2. Dimension: Date (Role-Playing Support)
-IF OBJECT_ID('gold.Dim_Date', 'U') IS NOT NULL DROP TABLE gold.Dim_Date;
+-- 2. Dimension: Date (Expanded Range 2005-2025)
 CREATE TABLE gold.Dim_Date (
     DateKey INT PRIMARY KEY,
     [Date] DATE NOT NULL,
@@ -21,15 +20,19 @@ CREATE TABLE gold.Dim_Date (
     DayName VARCHAR(15) NOT NULL
 );
 
--- Populate Date Dimension (2010 - 2015)
-DECLARE @StartDate DATE = '2010-01-01';
-DECLARE @EndDate DATE = '2015-12-31';
+-- Insert Unknown Date Placeholder for Nulls
+INSERT INTO gold.Dim_Date (DateKey, [Date], [Year], [Quarter], [Month], MonthName, DayOfWeek, DayName)
+VALUES (-1, '1900-01-01', 1900, 0, 0, 'Unknown', 0, 'Unknown');
+
+-- Populate Date Dimension (2005 - 2025)
+DECLARE @StartDate DATE = '2005-01-01';
+DECLARE @EndDate DATE = '2025-12-31';
 
 WHILE @StartDate <= @EndDate
 BEGIN
     INSERT INTO gold.Dim_Date
     SELECT 
-        CAST(CONVERT(VARCHAR(8), @StartDate, 112) AS INT),
+        (YEAR(@StartDate) * 10000) + (MONTH(@StartDate) * 100) + DAY(@StartDate),
         @StartDate,
         YEAR(@StartDate),
         DATEPART(QUARTER, @StartDate),
@@ -43,7 +46,6 @@ END;
 GO
 
 -- 3. Dimension: Customer
-IF OBJECT_ID('gold.Dim_Customer', 'U') IS NOT NULL DROP TABLE gold.Dim_Customer;
 CREATE TABLE gold.Dim_Customer (
     CustomerSK INT IDENTITY(1,1) PRIMARY KEY,
     CustomerID INT NOT NULL,
@@ -57,7 +59,6 @@ SELECT CustomerID, CustomerName, CustomerType, TerritoryID
 FROM silver.vw_Customer;
 
 -- 4. Dimension: Product
-IF OBJECT_ID('gold.Dim_Product', 'U') IS NOT NULL DROP TABLE gold.Dim_Product;
 CREATE TABLE gold.Dim_Product (
     ProductSK INT IDENTITY(1,1) PRIMARY KEY,
     ProductID INT NOT NULL,
@@ -74,14 +75,7 @@ INSERT INTO gold.Dim_Product (ProductID, ProductName, ProductNumber, Color, Stan
 SELECT ProductID, ProductName, ProductNumber, Color, StandardCost, ListPrice, SubcategoryName, CategoryName 
 FROM silver.vw_Product;
 
-USE [AdventureWorks2012];
-GO
-
--- 1. Drop Fact Table
-IF OBJECT_ID('gold.Fact_Sales', 'U') IS NOT NULL DROP TABLE gold.Fact_Sales;
-GO
-
--- 2. Re-create Fact_Sales Table
+-- 5. Fact: Sales
 CREATE TABLE gold.Fact_Sales (
     SalesOrderSK INT IDENTITY(1,1) PRIMARY KEY,
     SalesOrderID INT,
@@ -94,9 +88,7 @@ CREATE TABLE gold.Fact_Sales (
     UnitPriceDiscount MONEY,
     LineTotal NUMERIC(38, 6)
 );
-GO
 
--- 3. Insert using Mathematical Date Key Generation
 INSERT INTO gold.Fact_Sales (
     SalesOrderID, 
     SalesOrderDetailID, 
@@ -111,7 +103,7 @@ INSERT INTO gold.Fact_Sales (
 SELECT 
     s.SalesOrderID,
     s.SalesOrderDetailID,
-    (YEAR(s.OrderDateKey) * 10000) + (MONTH(s.OrderDateKey) * 100) + DAY(s.OrderDateKey) AS OrderDateKey,
+    ISNULL((YEAR(s.OrderDateKey) * 10000) + (MONTH(s.OrderDateKey) * 100) + DAY(s.OrderDateKey), -1) AS OrderDateKey,
     c.CustomerSK,
     p.ProductSK,
     s.OrderQty,
@@ -123,7 +115,7 @@ LEFT JOIN gold.Dim_Customer c ON s.CustomerID = c.CustomerID
 LEFT JOIN gold.Dim_Product p ON s.ProductID = p.ProductID;
 GO
 
--- 4. Verification Check
+-- 6. Verification Check
 SELECT 'Dim_Customer' AS TableName, COUNT(*) AS [RowCount] FROM gold.Dim_Customer
 UNION ALL
 SELECT 'Dim_Product', COUNT(*) FROM gold.Dim_Product
