@@ -74,8 +74,14 @@ INSERT INTO gold.Dim_Product (ProductID, ProductName, ProductNumber, Color, Stan
 SELECT ProductID, ProductName, ProductNumber, Color, StandardCost, ListPrice, SubcategoryName, CategoryName 
 FROM silver.vw_Product;
 
--- 5. Fact: Sales
+USE [AdventureWorks2012];
+GO
+
+-- 1. Drop Fact Table
 IF OBJECT_ID('gold.Fact_Sales', 'U') IS NOT NULL DROP TABLE gold.Fact_Sales;
+GO
+
+-- 2. Re-create Fact_Sales Table
 CREATE TABLE gold.Fact_Sales (
     SalesOrderSK INT IDENTITY(1,1) PRIMARY KEY,
     SalesOrderID INT,
@@ -88,12 +94,24 @@ CREATE TABLE gold.Fact_Sales (
     UnitPriceDiscount MONEY,
     LineTotal NUMERIC(38, 6)
 );
+GO
 
-INSERT INTO gold.Fact_Sales (SalesOrderID, SalesOrderDetailID, OrderDateKey, CustomerSK, ProductSK, OrderQty, UnitPrice, UnitPriceDiscount, LineTotal)
+-- 3. Insert using Mathematical Date Key Generation
+INSERT INTO gold.Fact_Sales (
+    SalesOrderID, 
+    SalesOrderDetailID, 
+    OrderDateKey, 
+    CustomerSK, 
+    ProductSK, 
+    OrderQty, 
+    UnitPrice, 
+    UnitPriceDiscount, 
+    LineTotal
+)
 SELECT 
     s.SalesOrderID,
     s.SalesOrderDetailID,
-    CAST(FORMAT(s.OrderDateKey, 'yyyyMMdd') AS INT) AS OrderDateKey,
+    (YEAR(s.OrderDateKey) * 10000) + (MONTH(s.OrderDateKey) * 100) + DAY(s.OrderDateKey) AS OrderDateKey,
     c.CustomerSK,
     p.ProductSK,
     s.OrderQty,
@@ -105,7 +123,7 @@ LEFT JOIN gold.Dim_Customer c ON s.CustomerID = c.CustomerID
 LEFT JOIN gold.Dim_Product p ON s.ProductID = p.ProductID;
 GO
 
--- Verification Check
+-- 4. Verification Check
 SELECT 'Dim_Customer' AS TableName, COUNT(*) AS [RowCount] FROM gold.Dim_Customer
 UNION ALL
 SELECT 'Dim_Product', COUNT(*) FROM gold.Dim_Product
